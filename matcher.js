@@ -4,13 +4,11 @@ export function normalize(s) {
 }
 
 export function cardName(s) { 
-  // Strips special tags (ex, gx, v, etc) and parens so names match even if foil badges get garbled
   return normalize(String(s).replace(/\b(EX|GX|V|VMAX|VSTAR|TAG\s*TEAM)\b/gi, '').replace(/\s*\([^)]*\)/g, '').replace(/\s*[-–]\s*\d.*$/, '')); 
 }
 
 export function numKey(s) { 
   if(!s) return '';
-  // Convert common OCR misreads in numbers (O -> 0, I/L -> 1)
   let clean = String(s).toUpperCase().replace(/O/g, '0').replace(/[IL]/g, '1').replace(/[^A-Z0-9]/g, '');
   return clean.replace(/(^|[A-Z])0+(?=\d)/g, '$1'); 
 }
@@ -44,11 +42,9 @@ export function identify(text, cards) {
   const compact = normalize(raw);
   const lines = raw.split(/[\n\r]+/).map(normalize).filter(Boolean);
   
-  // Find fractions like 022/088, but also support broken slashes like 022|088, 022\088, 022 088
   const fractions = [...raw.matchAll(/\b([A-Z]{0,5}[0-9OIl]{1,4})\s*[\/\\|!]\s*([A-Z]{0,5}[0-9OIl]{1,4})\b/g)]
     .map(m => [numKey(m[1]), numKey(m[2])]);
 
-  // Extract any isolated numbers on the card
   const rawTokens = raw.split(/[^A-Z0-9]+/).filter(Boolean);
   const numberTokens = new Set(rawTokens.filter(t => /\d/.test(t)).map(numKey));
 
@@ -57,7 +53,6 @@ export function identify(text, cards) {
   for (const c of cards) {
     if (!c._num || !c._name) continue;
 
-    // 1. Name check: exact or fuzzy
     let nameScore = compact.includes(c._name) ? 1 : 0;
     if (!nameScore) {
       for (const line of lines) {
@@ -67,9 +62,8 @@ export function identify(text, cards) {
         }
       }
     }
-    if (nameScore < 0.68) continue; // Skip if name doesn't match closely
+    if (nameScore < 0.68) continue;
 
-    // 2. Number check: fraction or standalone number
     const exactFraction = fractions.some(([n, t]) => n === c._num && (!c._total || t === c._total));
     const hasNumber = exactFraction || numberTokens.has(c._num) || fractions.some(([n]) => n === c._num);
 
@@ -85,7 +79,6 @@ export function identify(text, cards) {
   candidates.sort((a, b) => b.score - a.score);
   const best = candidates[0];
 
-  // Group top candidates
   const near = candidates.filter(x => best.score - x.score < 10);
   const sameIdentity = near.every(x => x.card._name === best.card._name);
 
