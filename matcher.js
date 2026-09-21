@@ -48,7 +48,7 @@ export function identify(text,cards) {
   const sameIdentity=near.every(x=>x.card._name===best.card._name && x.card._num===best.card._num && x.card.group===best.card.group);
   if(!sameIdentity) return {kind:'ambiguous',cards:near.map(x=>x.card)};
   // No fraction is acceptable for promos, but not a bare number lifted from an attack on a numbered set card.
-  if(!best.fraction && best.card._total && !near.some(x=>tokens.includes(normalize(x.card.setCode)))) return {kind:'none',cards:[]};
+  if(!best.fraction && best.card._total && best.name < 0.95) return {kind:'none',cards:[]};
   return {kind:'match',cards:near.map(x=>x.card)};
 }
 export function summarizePrices(cards) {
