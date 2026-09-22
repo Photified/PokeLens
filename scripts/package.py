@@ -8,7 +8,7 @@ with zipfile.ZipFile(source,'w',zipfile.ZIP_DEFLATED) as z:
 out=root/'site-dist'
 if out.exists():shutil.rmtree(out)
 out.mkdir()
-for name in ('index.html','style.css','app.js','matcher.js','visual.js','manifest.json','sw.js','assets','vendor','data','PokeLens-source.zip'):
+for name in ('index.html','style.css','app.js','matcher.js','visual.js','imaging.js','manifest.json','sw.js','assets','vendor','data','PokeLens-source.zip'):
  p=root/name
  if p.is_dir():shutil.copytree(p,out/name)
  else:shutil.copy2(p,out/name)
