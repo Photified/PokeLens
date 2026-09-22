@@ -1,6 +1,6 @@
-const CACHE='pokelens-v1.0.2';
+const CACHE='pokelens-v1.1.0';
 const BASE=new URL('./',self.location.href).href;
-const FILES=['./','./index.html','./style.css','./app.js','./matcher.js','./visual.js','./manifest.json','./assets/icon-192.png','./assets/icon-512.png','./vendor/tesseract.min.js','./vendor/worker.min.js','./vendor/tesseract-core-lstm.wasm.js','./vendor/tesseract-core-simd-lstm.wasm.js','./vendor/eng.traineddata.gz','./data/catalog.json'];
+const FILES=['./','./index.html','./style.css','./app.js','./matcher.js','./visual.js','./imaging.js','./manifest.json','./assets/icon-192.png','./assets/icon-512.png','./vendor/tesseract.min.js','./vendor/worker.min.js','./vendor/tesseract-core-lstm.wasm.js','./vendor/tesseract-core-simd-lstm.wasm.js','./vendor/best/eng.traineddata.gz','./data/catalog.json'];
 self.addEventListener('install',e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(FILES)).then(()=>self.skipWaiting())));
 self.addEventListener('activate',e=>e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('pokelens-')&&k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim())));
 self.addEventListener('fetch',e=>{

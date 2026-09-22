@@ -1,5 +1,6 @@
-import {prepare,identify,summarizePrices} from './matcher.js';
+import {prepare,identify,summarizePrices,nameCandidates} from './matcher.js';
 import {visualMatch} from './visual.js';
+import {cardViews,textRegion} from './imaging.js';
 const $=id=>document.getElementById(id);
 let catalog, cards=[], workerPromise, stream, timer, busy=false, deferredInstall=null, photoURL=null;
 let pref={auto:true,speak:false}, recent=[];
@@ -30,7 +31,8 @@ function getWorker(){
       const w=await Tesseract.createWorker('eng',1,{
         workerPath:new URL('./vendor/worker.min.js',location.href).href,
         corePath:new URL('./vendor/',location.href).href,
-        langPath:new URL('./vendor/',location.href).href,
+        langPath:new URL('./vendor/best/',location.href).href,
+        cachePath:'pokelens-ocr-v11',
         logger:m=>{if(busy&&m.status==='recognizing text')status('Reading card… '+Math.round(m.progress*100)+'%');}
       });
       await w.setParameters({tessedit_pageseg_mode:'11',preserve_interword_spaces:'1'});
@@ -47,7 +49,9 @@ async function startCamera(){
   try {
     if(!navigator.mediaDevices?.getUserMedia)throw new Error('Camera access requires HTTPS. Open your GitHub Pages URL in Chrome or Safari.');
     stopCamera();clearPhoto();$('result').hidden=true;
-    stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}}});
+    stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:3840},height:{ideal:2160}}});
+    const track=stream.getVideoTracks()[0];
+    try{if(track.getCapabilities?.().focusMode?.includes('continuous'))await track.applyConstraints({advanced:[{focusMode:'continuous'}]});}catch{}
     $('camera').srcObject=stream;$('camera').hidden=false;await $('camera').play();
     $('idleArt').hidden=true;$('stopCamera').hidden=false;$('viewfinder').hidden=false;
     $('cameraLabel').textContent='CAMERA ON';$('scanLabel').textContent='Scan now';$('frameHint').textContent='Fill the frame. Hold steady.';
@@ -62,21 +66,8 @@ function cameraFrame(){
   const ox=(video.videoWidth*scale-box.width)/2,oy=(video.videoHeight*scale-box.height)/2;
   const sx=(frame.left-box.left+ox)/scale,sy=(frame.top-box.top+oy)/scale;
   const sw=frame.width/scale,sh=frame.height/scale;
-  const canvas=document.createElement('canvas');canvas.width=1000;canvas.height=Math.round(1000*sh/sw);
+  const canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(sw));canvas.height=Math.max(1,Math.round(sh));
   canvas.getContext('2d').drawImage(video,sx,sy,sw,sh,0,0,canvas.width,canvas.height);return canvas;
-}
-function enhance(source,bands=false){
-  const c=document.createElement('canvas');c.width=1100;
-  if(bands){
-    c.height=Math.round(1100*source.height/source.width*.45)+90;
-    const ctx=c.getContext('2d');ctx.fillStyle='white';ctx.fillRect(0,0,c.width,c.height);
-    const topH=Math.round(1100*source.height/source.width*.2),bottomH=Math.round(1100*source.height/source.width*.25);
-    ctx.drawImage(source,0,0,source.width,source.height*.2,0,0,1100,topH);
-    ctx.drawImage(source,0,source.height*.75,source.width,source.height*.25,0,topH+60,1100,bottomH);
-  }else{c.height=Math.round(1100*source.height/source.width);c.getContext('2d').drawImage(source,0,0,c.width,c.height);}
-  const ctx=c.getContext('2d'),img=ctx.getImageData(0,0,c.width,c.height);
-  for(let i=0;i<img.data.length;i+=4){const v=.299*img.data[i]+.587*img.data[i+1]+.114*img.data[i+2];const a=Math.max(0,Math.min(255,(v-128)*1.35+128));img.data[i]=img.data[i+1]=img.data[i+2]=a;}
-  ctx.putImageData(img,0,0);return c;
 }
 async function scanCamera(){if(busy||!stream||!$('camera').videoWidth)return;scheduleStop();await runScan(cameraFrame(),true);}
 function scheduleStop(){clearTimeout(timer);}
@@ -85,19 +76,38 @@ async function runScan(canvas,fromCamera=false){
   $('scanLabel').textContent='Scanning…';
   try {
     const w=await getWorker();
-    const first=await w.recognize(enhance(canvas));
-    let combinedText=first.data.text;
+    const views=cardViews(canvas),aligned=views[0];
+    status('Reading card name…');
+    await w.setParameters({tessedit_pageseg_mode:'7'});
+    const titleRead=await w.recognize(textRegion(aligned,'title','color'));
+    let title=titleRead.data.text;
+    if(!nameCandidates(title,cards).length){
+      for(const alternative of views.slice(1,3)){
+        const extra=await w.recognize(textRegion(alternative,'title','color'));
+        title+='\n'+extra.data.text;
+        if(nameCandidates(title,cards).length)break;
+      }
+    }
+    await w.setParameters({tessedit_pageseg_mode:'11'});
+    status('Reading card number…');
+    const numberRead=await w.recognize(textRegion(aligned,'bottom','gray'));
+    let combinedText=title+'\n'+numberRead.data.text;
     let match=identify(combinedText,cards);
     if(match.kind!=='match'){
-      status('Checking the card number…');
-      const second=await w.recognize(enhance(canvas,true));
-      combinedText+='\n'+second.data.text;
-      match=identify(combinedText,cards);
+      status('Matching card artwork…');
+      const visual=await visualMatch(aligned,combinedText,cards,title,views);
+      if(visual)match=visual;
     }
     if(match.kind!=='match'){
-      status('Comparing card artwork…');
-      const visual=await visualMatch(canvas,combinedText,cards);
-      if(visual)match=visual;
+      // A second exposure treatment helps dark reverse holos and reflective lettering.
+      status('Checking foil details…');
+      const second=await w.recognize(textRegion(canvas,'full','legacy'));
+      combinedText+='\n'+second.data.text;
+      match=identify(combinedText,cards);
+      if(match.kind!=='match'){
+        const visual=await visualMatch(aligned,combinedText,cards,title+'\n'+second.data.text.split('\n').slice(0,10).join(' '),views);
+        if(visual)match=visual;
+      }
     }
     if(match.kind==='match'){
       stopCamera();clearPhoto();$('captured').src=canvas.toDataURL('image/jpeg',.8);$('captured').hidden=false;$('idleArt').hidden=true;$('viewfinder').hidden=true;
@@ -145,7 +155,7 @@ $('photoInput').onchange=async e=>{
   const file=e.target.files?.[0];if(!file||busy)return;stopCamera();clearPhoto();
   try{
     photoURL=URL.createObjectURL(file);const im=new Image();im.src=photoURL;await im.decode();
-    const c=document.createElement('canvas'),scale=Math.min(1,1800/Math.max(im.width,im.height));c.width=Math.round(im.width*scale);c.height=Math.round(im.height*scale);c.getContext('2d').drawImage(im,0,0,c.width,c.height);
+    const c=document.createElement('canvas'),scale=Math.min(1,3200/Math.max(im.width,im.height));c.width=Math.round(im.width*scale);c.height=Math.round(im.height*scale);c.getContext('2d').drawImage(im,0,0,c.width,c.height);
     $('captured').src=photoURL;$('captured').hidden=false;$('idleArt').hidden=true;$('viewfinder').hidden=true;
     await runScan(c);
   }catch{message('Photo unavailable','Choose a JPG, PNG or WebP photo and try again.');}

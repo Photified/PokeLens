@@ -60,3 +60,11 @@ export function numberCandidates(text,cards) {
   const fractions=[...String(text).toUpperCase().matchAll(/\b([A-Z]{0,5}\d{1,4})\s*[/|]\s*([A-Z]{0,5}\d{1,4})\b/g)].map(m=>[numKey(m[1]),numKey(m[2])]);
   return cards.filter(c=>fractions.some(([n,t])=>c._num===n&&c._total===t));
 }
+// A title match only proposes reference artwork. It never directly returns a price.
+export function nameCandidates(title,cards){
+ const text=normalize(title),words=String(title).toUpperCase().split(/[^A-Z0-9]+/).filter(w=>w.length>=4);
+ const names=[...new Set(cards.map(c=>c._name.replace(/(?:VMAX|VSTAR|GX|EX|V|BREAK)$/,'')))];
+ const found=names.filter(n=>n.length>=4&&(text.includes(n)||words.some(w=>w.length>=5&&Math.abs(n.length-w.length)<=1&&distance(n,w)<=1)));
+ const longest=found.filter(n=>!found.some(other=>other!==n&&other.includes(n)));
+ return cards.filter(c=>longest.includes(c._name.replace(/(?:VMAX|VSTAR|GX|EX|V|BREAK)$/,'')));
+}

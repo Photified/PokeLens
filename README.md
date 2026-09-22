@@ -21,8 +21,8 @@ The top-right cog contains How to use, Install App, Download App Files, automati
 ## What the scanner can and cannot do
 
 - The snapshot includes all available numbered singles and other identifiable single-card listings in TCGCSV's Pokémon category. No set allowlist or release cutoff is used. The next daily run discovers new sets automatically.
-- This version uses **English OCR** plus artwork comparison for candidates with the same printed card number, not a paid visual AI model. Catalog coverage does not imply that every physical card will scan successfully. Non-English cards are not supported by this OCR model.
-- Text matches require the card name AND number. When name recognition fails, a complete card number can narrow a comparison against reference artwork. Numbered set cards generally also require the printed denominator or set abbreviation. A Pokémon name alone is never enough to show a price.
+- This version uses **English OCR** plus artwork comparison for candidates with a matching card number or name, not a paid visual AI model. Catalog coverage does not imply that every physical card will scan successfully. Non-English cards are not supported by this OCR model.
+- Text matches require the card name AND number. A card number or a recognized name can shortlist reference artwork. A name alone never directly establishes a price; the artwork must also match when number recognition fails. Numbered set cards generally also require the printed denominator or set abbreviation. A Pokémon name alone is never enough to show a price.
 - Text recognition can fail on sleeves, glare, elaborate card art, rotated cards, damaged cards, low resolution, and some promos. Retry in better light. There is deliberately no manual data-entry step.
 - Holo, reverse holo, edition stamps and subtle printing changes cannot be reliably determined by this text scanner. Where multiple prices match, the app shows the range and printing prices automatically rather than silently choosing one. Ambiguous matches across different sets require a clearer scan. It does not claim to be a flawless Collectr replacement.
 - Prices are **TCGplayer market, USD**, sourced through TCGCSV. They are not condition-specific, graded values, offers to buy, or guaranteed sale prices. Missing market prices remain unavailable, never $0.
@@ -40,8 +40,8 @@ When extracting the app's **Download App Files** ZIP, run the included GitHub wo
 ## Files & local checks
 
 - `index.html`, `style.css`, `app.js`: mobile UI, camera, OCR, results, settings.
-- `matcher.js`, `visual.js`: conservative text/artwork matching and market-price summarization.
-- `vendor/`: bundled Tesseract.js 5.1.1, core 5.1.1 and English fast OCR model; no runtime CDN required.
+- `imaging.js`, `matcher.js`, `visual.js`: conservative text/artwork matching and market-price summarization.
+- `vendor/`: bundled Tesseract.js 5.1.1, core 5.1.1 and English high-accuracy OCR model; no runtime CDN required.
 - `data/catalog.json`: timestamped card and price snapshot.
 - `manifest.json`, `sw.js`, `assets/`: installability and offline caching.
 - `.github/workflows/pages.yml`: scheduled refresh and GitHub Pages deployment.
@@ -54,5 +54,15 @@ When changing app shell files, bump the cache version in `sw.js`. Data uses netw
 
 Data: TCGplayer via https://tcgcsv.com/ (usage details: https://tcgcsv.com/docs).
 Recognition: https://github.com/naptha/tesseract.js (Apache 2.0), bundled license in `vendor/`.
-English trained model: https://tessdata.projectnaptha.com/4.0.0_fast/eng.traineddata.gz, Tesseract tessdata_fast (Apache 2.0).
+English trained model: https://github.com/tesseract-ocr/tessdata_best, Tesseract tessdata_best (Apache 2.0).
 Independent fan tool, not affiliated with Pokémon, Nintendo, Creatures, GAME FREAK, TCGplayer, or Collectr.
+
+## Version 1.1 update
+
+Larger viewfinder, camera requests up to 3840 × 2160 (device-dependent), and native-resolution frame capture. Uploaded images retain up to 3200 pixels on their long edge. Adds automatic border cropping, focused title/number OCR, the higher-accuracy English model, name-assisted artwork lookup, framing tolerance, and high-quality image resampling. Artwork comparison gives more weight to the illustration so reverse-holo text panels do not dominate the result. Alternative visual windows are small thumbnails to limit mobile memory use.
+
+Regression checks matched both user-supplied screenshot card regions: Lapras ex 022/088 and Dewgong 019/088. These are small image tests, not a guarantee for every physical card or lighting condition. Several visually similar printings can still yield a range.
+
+Condition pricing was intentionally not added. No guessed NM/LP/MP/HP/Damaged discounts are calculated. Collectr is not connected.
+
+To update an existing repository, upload the contents over the old files. The `vendor/best` folder and `imaging.js` are new and required. The existing workflow path stays `.github/workflows/pages.yml`. Wait for the GitHub Actions deployment to finish, then close and reopen the app to load v1.1. Settings shows the version at the bottom. The first load downloads a larger recognition model.
