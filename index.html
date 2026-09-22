@@ -25,7 +25,8 @@
 <button id="uploadButton" class="secondary" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="4"/><circle cx="8" cy="8" r="1"/><path d="m3 17 6-6 5 5 3-3 4 4"/></svg>Scan a photo</button>
 <input id="photoInput" type="file" accept="image/*" hidden>
 <section id="result" class="result" hidden aria-live="polite">
-  <div class="result-top"><span class="eyebrow">TCGPLAYER MARKET</span><span class="currency">USD</span></div>
+  <div class="result-top"><span id="resultLabel" class="eyebrow">POSSIBLE MATCHES</span><span class="currency">USD</span></div>
+  <div id="candidateList" class="candidate-list" role="list" aria-label="Possible card matches"></div><button id="moreMatches" class="secondary" hidden>Show more matches</button><button id="backMatches" class="secondary" hidden>Back to possible matches</button>
   <div id="price" class="price"></div><p id="priceNote" class="price-note"></p>
   <div class="matched-card"><img id="cardImage" alt="" hidden><div><h2 id="cardName"></h2><p id="cardSet"></p><p id="cardNumber"></p></div></div>
   <div id="variantPrices" class="variants"></div>
@@ -36,14 +37,14 @@
 <footer><span class="tiny-orb" aria-hidden="true"></span>No credits. No scan limit.<p id="catalogInfo"></p></footer>
 </main></div>
 <dialog id="settings"><div class="modal-header"><h2>Settings</h2><button class="icon-button" id="settingsClose" aria-label="Close settings">×</button></div>
-<h3>How to use</h3><ol><li>Tap <strong>Scan a card</strong> and allow the camera.</li><li>Fill the frame with one upright card. Keep it flat and avoid glare.</li><li>Hold steady. Your price appears automatically.</li></ol>
+<h3>How to use</h3><ol><li>Tap <strong>Scan a card</strong> and allow the camera.</li><li>Fill the frame with one upright card. Keep it flat and avoid glare.</li><li>Hold steady. Possible matches and prices appear automatically. Scroll to compare, then tap your card.</li></ol>
 <p class="muted">You can also scan a clear photo. No card names or numbers to type.</p>
 <button id="install" class="primary">Install App</button><p id="installHelp" class="muted" role="status"></p>
 <a class="secondary download" href="./PokeLens-source.zip" download>Download App Files</a>
-<div class="setting-row"><div><strong>Automatic scanning</strong><small>Scan when the camera is open</small></div><input id="autoScan" type="checkbox" checked aria-label="Automatic scanning"></div>
+<div class="setting-row"><div><strong>Automatic scanning</strong><small>Scan automatically; pause while you compare matches</small></div><input id="autoScan" type="checkbox" checked aria-label="Automatic scanning"></div>
 <div class="setting-row"><div><strong>Read price aloud</strong><small>Speak the card name and price</small></div><input id="speak" type="checkbox" aria-label="Read price aloud"></div>
 <button id="refreshData" class="secondary">Refresh card catalog</button>
-<details><summary>Prices & coverage</summary><p>TCGplayer market prices in US dollars, supplied by TCGCSV. Market price is a reference, not a condition-specific offer or a graded-card valuation.</p><p>All available numbered singles from the Pokémon catalog are included. English text recognition is supported. Cards absent from the provider, unreadable scans, foreign-language cards, and certain promos may not be recognized.</p><p>Foil, stamps and edition differences cannot always be distinguished from one photo. When several printings match, their available market prices appear as a range. Missing prices are never shown as $0.</p><p>Prices refresh when the GitHub data workflow runs. Check the date on your result. Photos stay on this device; listing images are loaded from TCGplayer.</p><p><a href="https://tcgcsv.com/" target="_blank" rel="noopener">TCGCSV</a> · <a href="https://www.tcgplayer.com/" target="_blank" rel="noopener">TCGplayer</a></p></details>
-<p class="version">PokéLens 1.1 · Independent fan project</p></dialog>
+<details><summary>Prices & coverage</summary><p>TCGplayer market prices in US dollars, supplied by TCGCSV. Market price is a reference, not a condition-specific offer or a graded-card valuation.</p><p>All available numbered singles from the Pokémon catalog are included. English text recognition is supported. Cards absent from the provider, unreadable scans, foreign-language cards, and certain promos may not be recognized.</p><p>Foil, stamps and edition differences cannot always be distinguished from one photo. When several printings match, each candidate shows its available market prices. Missing prices are never shown as $0.</p><p>Prices refresh when the GitHub data workflow runs. Check the date on your result. Photos stay on this device; listing images are loaded from TCGplayer.</p><p><a href="https://tcgcsv.com/" target="_blank" rel="noopener">TCGCSV</a> · <a href="https://www.tcgplayer.com/" target="_blank" rel="noopener">TCGplayer</a></p></details>
+<p class="version">PokéLens 1.2 · Independent fan project</p></dialog>
 <dialog id="message"><div class="modal-header"><h2 id="messageTitle"></h2><button id="messageClose" class="icon-button" aria-label="Close message">×</button></div><p id="messageText"></p><button id="messageOkay" class="primary">Got it</button></dialog>
 </body></html>

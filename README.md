@@ -22,9 +22,10 @@ The top-right cog contains How to use, Install App, Download App Files, automati
 
 - The snapshot includes all available numbered singles and other identifiable single-card listings in TCGCSV's Pokémon category. No set allowlist or release cutoff is used. The next daily run discovers new sets automatically.
 - This version uses **English OCR** plus artwork comparison for candidates with a matching card number or name, not a paid visual AI model. Catalog coverage does not imply that every physical card will scan successfully. Non-English cards are not supported by this OCR model.
-- Text matches require the card name AND number. A card number or a recognized name can shortlist reference artwork. A name alone never directly establishes a price; the artwork must also match when number recognition fails. Numbered set cards generally also require the printed denominator or set abbreviation. A Pokémon name alone is never enough to show a price.
-- Text recognition can fail on sleeves, glare, elaborate card art, rotated cards, damaged cards, low resolution, and some promos. Retry in better light. There is deliberately no manual data-entry step.
-- Holo, reverse holo, edition stamps and subtle printing changes cannot be reliably determined by this text scanner. Where multiple prices match, the app shows the range and printing prices automatically rather than silently choosing one. Ambiguous matches across different sets require a clearer scan. It does not claim to be a flawless Collectr replacement.
+- Results are ranked **possible matches**, not a claim of an exact printing. Name, collector number, HP, attack names and readable set codes contribute independently where metadata is available. Three-letter and split names such as Mew are supported. Unreadable details do not veto other evidence.
+- Existing artwork comparison reranks up to 120 text-backed candidates. This is a targeted revision, not a newly trained vision model or a whole-catalog image-only search. Completely unreadable text can still prevent results. Set symbols and stamps are not independently classified; visually similar listings remain alternatives.
+- The result panel lists each candidate with its own image, set, number and available normal/holo/reverse prices. Scroll and use Show more matches for further alternatives. Tap a card to select its listing, then Back to possible matches to compare again. No manual names or numbers are required.
+- In camera mode, a second frame contributes details only if the appearance remains similar. The camera stays on while results are reviewed; automatic processing pauses to avoid replacing results mid-selection. Tap Scan next card to continue.
 - Prices are **TCGplayer market, USD**, sourced through TCGCSV. They are not condition-specific, graded values, offers to buy, or guaranteed sale prices. Missing market prices remain unavailable, never $0.
 - Catalog/source timestamps are displayed with every result. Prices older than three days are explicitly marked. Offline scans use the last stored catalog. New scans do not make external price requests. Artwork comparison requires an internet connection or previously cached reference images.
 - Scans/photos are not uploaded. Recent scan identities remain on this device. Card listing thumbnails load from TCGplayer. Clear removes recent scan history.
@@ -46,9 +47,9 @@ When extracting the app's **Download App Files** ZIP, run the included GitHub wo
 - `manifest.json`, `sw.js`, `assets/`: installability and offline caching.
 - `.github/workflows/pages.yml`: scheduled refresh and GitHub Pages deployment.
 
-Local preview: `python -m http.server 8080`, then open http://localhost:8080. For a phone, use the HTTPS Pages URL. Matcher checks: `node tests/matcher.test.js`.
+Local preview: `python -m http.server 8080`, then open http://localhost:8080. For a phone, use the HTTPS Pages URL. Matcher checks: `npm test`.
 
-When changing app shell files, bump the cache version in `sw.js`. Data uses network-first refresh and preserves the offline snapshot. This v1 was checked with browser uploads, a simulated camera stream, real catalog data, matching checks, install/settings dialogs, and offline loading. It returned matches on clear modern-card reference images and rejected a low-resolution vintage-card reference. Physical phone camera accuracy still needs testing on your device. No claim of universal recognition is made.
+When changing app shell files, bump the cache version in `sw.js`. Data uses network-first refresh and preserves the offline snapshot. Version 1.2 was checked using the four supplied screenshot card regions, native Tesseract with the bundled English model, the actual recognition modules and a simulated DOM for result interactions. Those checks are not physical phone-camera or browser-WASM performance measurements. No claim of universal recognition is made.
 
 ## Credits
 
@@ -66,3 +67,11 @@ Regression checks matched both user-supplied screenshot card regions: Lapras ex 
 Condition pricing was intentionally not added. No guessed NM/LP/MP/HP/Damaged discounts are calculated. Collectr is not connected.
 
 To update an existing repository, upload the contents over the old files. The `vendor/best` folder and `imaging.js` are new and required. The existing workflow path stays `.github/workflows/pages.yml`. Wait for the GitHub Actions deployment to finish, then close and reopen the app to load v1.1. Settings shows the version at the bottom. The first load downloads a larger recognition model.
+
+## Version 1.2 update
+
+Reuses the existing UI, OCR model, image comparison and pricing provider. Adds ranked possible matches, per-listing prices, more-results paging, selection/back navigation, short-name handling, independent HP/attack evidence and a second camera frame check. Reference-image failures preserve text-backed candidates. Recent history records user-selected listings, not unconfirmed guesses.
+
+`sync_catalog.py` now includes HP and attack names from TCGCSV when supplied. Existing prices keep their source timestamp. The scheduled workflow builds an enriched snapshot for all returned products; listings without this metadata continue to use other cues.
+
+Upload the ZIP contents over the existing repository files, including `.github/workflows/pages.yml`. Wait for deployment, then reopen the app. Settings should show **PokéLens 1.2**. No condition pricing or Collectr connection was added.

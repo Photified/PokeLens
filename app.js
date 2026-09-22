@@ -1,8 +1,10 @@
-import {prepare,identify,summarizePrices,nameCandidates} from './matcher.js';
-import {visualMatch} from './visual.js';
+import {prepare,identify,summarizePrices,nameCandidates,rankCandidates,mergeEvidence} from './matcher.js';
+import {visualRank,sameFrame} from './visual.js';
 import {cardViews,textRegion} from './imaging.js';
 const $=id=>document.getElementById(id);
 let catalog, cards=[], workerPromise, stream, timer, busy=false, deferredInstall=null, photoURL=null;
+let selectedDuringScan=false;
+let resultCandidates=[], candidateCount=0, scanGeneration=0;
 let pref={auto:true,speak:false}, recent=[];
 try { pref={...pref,...JSON.parse(localStorage.getItem('pokelens-prefs')||'{}')}; recent=JSON.parse(localStorage.getItem('pokelens-recent')||'[]'); if(!Array.isArray(recent))recent=[]; } catch {}
 const money=x=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(x);
@@ -41,8 +43,8 @@ function getWorker(){
   }
   return workerPromise;
 }
-function stopCamera(){clearTimeout(timer);if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;}$('camera').srcObject=null;$('camera').hidden=true;$('stopCamera').hidden=true;$('cameraLabel').textContent='READY WHEN YOU ARE';if(!$('captured').src)$('idleArt').hidden=false;$('scanLabel').textContent='Scan a card';}
-function schedule(){clearTimeout(timer);if(stream&&pref.auto&&!busy&&!$('settings').open&&!$('message').open)timer=setTimeout(()=>scanCamera(),1800);}
+function stopCamera(){scanGeneration++;clearTimeout(timer);if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;}$('camera').srcObject=null;$('camera').hidden=true;$('stopCamera').hidden=true;$('cameraLabel').textContent='READY WHEN YOU ARE';if(!$('captured').src)$('idleArt').hidden=false;$('scanLabel').textContent='Scan a card';}
+function schedule(){clearTimeout(timer);if(stream&&pref.auto&&!busy&&!$('settings').open&&!$('message').open&&$('result').hidden)timer=setTimeout(()=>scanCamera(),1800);}
 async function startCamera(){
   if(busy)return;
   if(!cards.length)return loadCatalog();
@@ -72,58 +74,96 @@ function cameraFrame(){
 async function scanCamera(){if(busy||!stream||!$('camera').videoWidth)return;scheduleStop();await runScan(cameraFrame(),true);}
 function scheduleStop(){clearTimeout(timer);}
 async function runScan(canvas,fromCamera=false){
-  if(busy)return;busy=true;$('scanButton').disabled=true;$('uploadButton').disabled=true;$('result').hidden=true;document.querySelector('.scanner').classList.add('busy');
-  $('scanLabel').textContent='Scanning…';
+  if(busy)return;
+  const generation=scanGeneration;
+  busy=true;selectedDuringScan=false;resultCandidates=[];$('result').hidden=true;$('nextScan').disabled=true;$('scanButton').disabled=true;$('uploadButton').disabled=true;
+  document.querySelector('.scanner').classList.add('busy');$('scanLabel').textContent='Scanning…';
   try {
-    const w=await getWorker();
-    const views=cardViews(canvas),aligned=views[0];
-    status('Reading card name…');
+    const w=await getWorker(),views=cardViews(canvas),aligned=views[0];
     await w.setParameters({tessedit_pageseg_mode:'7'});
-    const titleRead=await w.recognize(textRegion(aligned,'title','color'));
-    let title=titleRead.data.text;
-    if(!nameCandidates(title,cards).length){
-      for(const alternative of views.slice(1,3)){
-        const extra=await w.recognize(textRegion(alternative,'title','color'));
-        title+='\n'+extra.data.text;
-        if(nameCandidates(title,cards).length)break;
-      }
-    }
+    status('Reading card details…');
+    let title=(await w.recognize(textRegion(aligned,'title','color'))).data.text;
+    if(!nameCandidates(title,cards).length){for(const view of views.slice(1,3)){title+='\n'+(await w.recognize(textRegion(view,'title','color'))).data.text;if(nameCandidates(title,cards).length)break;}}
     await w.setParameters({tessedit_pageseg_mode:'11'});
-    status('Reading card number…');
-    const numberRead=await w.recognize(textRegion(aligned,'bottom','gray'));
-    let combinedText=title+'\n'+numberRead.data.text;
-    let match=identify(combinedText,cards);
-    if(match.kind!=='match'){
-      status('Matching card artwork…');
-      const visual=await visualMatch(aligned,combinedText,cards,title,views);
-      if(visual)match=visual;
+    let combinedText=title+'\n'+(await w.recognize(textRegion(canvas,'full','legacy'))).data.text;
+    // The original image is read too: holders can confuse the edge-based crop.
+    combinedText+='\n'+(await w.recognize(textRegion(aligned,'bottom','gray'))).data.text;
+    let ranked=rankCandidates(combinedText,cards,combinedText);
+    if(!ranked.length){
+      combinedText+='\n'+(await w.recognize(textRegion(aligned,'full','gray'))).data.text;
+      ranked=rankCandidates(combinedText,cards,combinedText);
     }
-    if(match.kind!=='match'){
-      // A second exposure treatment helps dark reverse holos and reflective lettering.
-      status('Checking foil details…');
-      const second=await w.recognize(textRegion(canvas,'full','legacy'));
-      combinedText+='\n'+second.data.text;
-      match=identify(combinedText,cards);
-      if(match.kind!=='match'){
-        const visual=await visualMatch(aligned,combinedText,cards,title+'\n'+second.data.text.split('\n').slice(0,10).join(' '),views);
-        if(visual)match=visual;
+    if(fromCamera&&stream&&generation===scanGeneration){
+      const next=cameraFrame();
+      // Fuse text only while the same card is still present, never across unrelated pulls.
+      if(sameFrame(canvas,next)){
+        combinedText+='\n'+(await w.recognize(textRegion(next,'full','gray'))).data.text;
+        views.push(...cardViews(next).slice(0,3));
+        ranked=rankCandidates(combinedText,cards,combinedText);
       }
     }
-    if(match.kind==='match'){
-      stopCamera();clearPhoto();$('captured').src=canvas.toDataURL('image/jpeg',.8);$('captured').hidden=false;$('idleArt').hidden=true;$('viewfinder').hidden=true;
-      showResult(match.cards);status('Card found.');$('cameraLabel').textContent='SCAN COMPLETE';$('frameHint').textContent='Ready for the next one.';
+    if(fromCamera&&(!stream||generation!==scanGeneration))return;
+    if(ranked.length){
+      // Render useful suggestions before downloading any reference images.
+      showCandidates(ranked,fromCamera,false);
+      status('Possible matches found. Comparing artwork…');
+      const visual=await visualRank(views,ranked.slice(0,120).map(r=>r.card));
+      if(fromCamera&&(!stream||generation!==scanGeneration))return;
+      ranked=mergeEvidence(ranked,visual);
+      if(!selectedDuringScan)showCandidates(ranked,fromCamera,true);else resultCandidates=ranked;
+      if(!fromCamera){clearPhoto();$('captured').src=canvas.toDataURL('image/jpeg',.8);$('captured').hidden=false;$('idleArt').hidden=true;$('viewfinder').hidden=true;}
+      status(selectedDuringScan?'Selected card. Tap Scan next card to continue.':'Possible matches ready. Scroll to compare printings.');
+      $('frameHint').textContent='Matches below. Tap Scan next card to continue.';
     }else{
-      const text=match.kind==='ambiguous'?'Similar cards found. Get closer and reduce glare.':'Couldn’t read this card. Get closer and keep all four corners visible.';
-      status(text,true);$('frameHint').textContent=match.kind==='ambiguous'?'Need a clearer view of the printing.':'Try better light. Keep the card upright.';
-      if(!fromCamera)message('Try another photo',text+' The scanner currently reads English card text.');
+      status('No useful match yet. '+(fromCamera?'Checking again automatically.':'Try a closer photo.'),true);
+      $('frameHint').textContent='Keep the card in view.';
     }
-  }catch(e){status('Scan failed. Tap Scan now or try another photo.',true);if(stream)stopCamera();message('Scanner unavailable',e.message||'Reload the app and try again.');}
-  finally{busy=false;document.querySelector('.scanner').classList.remove('busy');$('scanButton').disabled=false;$('uploadButton').disabled=false;$('scanLabel').textContent=stream?'Scan now':'Scan a card';schedule();}
+  }catch(e){status('Scan interrupted. Tap Scan now to retry.',true);message('Scanner unavailable',e.message||'Reload the app and try again.');}
+  finally{busy=false;$('nextScan').disabled=false;document.querySelector('.scanner').classList.remove('busy');$('scanButton').disabled=false;$('uploadButton').disabled=false;$('scanLabel').textContent=stream?'Scan now':'Scan a card';schedule();}
 }
+function showCandidates(ranked,fromCamera=false,settled=true){
+ const previousTop=resultCandidates[0]?.card.id;const scrollTop=$('candidateList').scrollTop;
+ resultCandidates=ranked;candidateCount=0;
+ $('result').hidden=false;$('resultLabel').textContent='POSSIBLE MATCHES';
+ $('price').hidden=true;$('priceNote').textContent='Compare the image and printing. Tap your card.';
+ document.querySelector('.matched-card').hidden=true;$('variantPrices').hidden=true;
+ $('listing').hidden=true;const date=new Date(catalog.sourceUpdated);const stale=Number.isFinite(+date)&&Date.now()-date.getTime()>3*86400000;
+ $('priceDate').textContent=(stale?'Older prices · ':'Updated ')+(Number.isFinite(+date)?date.toLocaleDateString():'date unavailable');
+ $('candidateList').hidden=false;$('candidateList').replaceChildren();appendCandidates();$('candidateList').scrollTop=scrollTop;
+ // Avoid jumping the page while the user compares options or the ranking updates.
+ if(!fromCamera&&previousTop==null)$('result').scrollIntoView({behavior:'smooth',block:'nearest'});
+ if(settled)navigator.vibrate?.(40);
+}
+function appendCandidates(){
+ const end=Math.min(candidateCount+12,resultCandidates.length);
+ for(;candidateCount<end;candidateCount++){
+  const {card,evidence}=resultCandidates[candidateCount];
+  const button=document.createElement('article');button.className='candidate';button.setAttribute('role','listitem');
+  const choose=selection=>{selectedDuringScan=busy;showResult(selection);$('resultLabel').textContent='SELECTED CARD';};
+  const image=document.createElement('img');image.loading='lazy';image.alt=card.name;image.src=safeURL(card.image);image.onerror=()=>image.hidden=true;
+  const info=document.createElement('span');info.className='candidate-info';
+  const title=document.createElement('button');title.type='button';title.className='candidate-select';title.textContent=card.name;title.onclick=()=>choose([card]);
+  const detail=document.createElement('span');detail.textContent=card.set+(card.number?' · #'+card.number:'');
+  const clues=document.createElement('small');clues.textContent=evidence.length?evidence.join(' · '):'Possible printing';
+  info.append(title,detail,clues);
+  const prices=(card.prices||[]).filter(p=>typeof p.market==='number'&&Number.isFinite(p.market)&&p.market>=0);
+  for(const p of prices){const row=document.createElement('button');row.type='button';row.className='candidate-price';row.textContent=p.type+' · '+money(p.market);row.setAttribute('aria-label',card.name+', '+p.type+', '+money(p.market));row.onclick=()=>choose([{...card,prices:[p]}]);info.append(row);}
+  if(!prices.length){const row=document.createElement('span');row.textContent='No market price available';info.append(row);}
+  button.append(image,info);
+  $('candidateList').append(button);
+ }
+ $('moreMatches').hidden=candidateCount>=resultCandidates.length;
+ $('moreMatches').textContent=`Show more matches (${resultCandidates.length-candidateCount})`;
+ $('backMatches').hidden=true;
+}
+$('moreMatches').onclick=appendCandidates;
+$('backMatches').onclick=()=>{selectedDuringScan=false;return showCandidates(resultCandidates,!!stream,false);};
 function showResult(matches,record=true){
   const card=matches[0],p=summarizePrices(matches);$('result').hidden=false;
+  $('resultLabel').textContent='SELECTED CARD';$('price').hidden=false;document.querySelector('.matched-card').hidden=false;$('variantPrices').hidden=false;
+  $('candidateList').hidden=true;$('moreMatches').hidden=true;$('backMatches').hidden=!resultCandidates.length;
   $('price').textContent=priceText(p);
-  $('priceNote').textContent=!p?'This listing has no market price yet.':p.rows.length>1?'Available printing prices. Foil and edition may vary.':'Market reference · ungraded card';
+  $('priceNote').textContent=!p?'This listing has no market price yet.':p.rows.length>1?'Available printing prices. Foil and edition may vary.':(p.rows[0].type+' · market reference');
   $('cardName').textContent=card._name?card.name:card.name;$('cardSet').textContent=new Set(matches.map(c=>c.group)).size>1?'Multiple matching printings':card.set;$('cardNumber').textContent=card.number?'#'+card.number:'';
   $('cardImage').hidden=!safeURL(card.image);if(safeURL(card.image))$('cardImage').src=safeURL(card.image);
   $('cardImage').alt=card.name;$('cardImage').onerror=()=>$('cardImage').hidden=true;
@@ -137,7 +177,7 @@ function showResult(matches,record=true){
   }
   $('result').scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth',block:'nearest'});
   if(record){
-    recent=[{ids:matches.map(c=>c.id),name:card.name,image:card.image,display:priceText(p)},...recent.filter(r=>r.ids?.[0]!==card.id)].slice(0,5);
+    recent=[{ids:matches.map(c=>c.id),types:matches.length===1?matches[0].prices.map(p=>p.type):null,name:card.name,image:card.image,display:priceText(p)},...recent.filter(r=>r.ids?.[0]!==card.id)].slice(0,5);
     try{localStorage.setItem('pokelens-recent',JSON.stringify(recent));}catch{}renderRecent();
     if(pref.speak&&'speechSynthesis'in window){const spoken=!p?'No price available':p.low===p.high?`${p.low} US dollars`:`${p.low} to ${p.high} US dollars, depending on printing`;speechSynthesis.cancel();speechSynthesis.speak(new SpeechSynthesisUtterance(`${card.name}. ${spoken}.`));}
     navigator.vibrate?.(60);
@@ -145,11 +185,11 @@ function showResult(matches,record=true){
 }
 function renderRecent(){
   $('recentSection').hidden=!recent.length;$('recentList').replaceChildren();
-  for(const r of recent){const b=document.createElement('button');b.className='recent-item';const im=document.createElement('img');im.alt='';im.src=safeURL(r.image);im.onerror=()=>im.hidden=true;const name=document.createElement('strong');name.textContent=r.name;const p=document.createElement('span');p.textContent=r.display;b.append(im,name,p);b.onclick=()=>{if(busy)return;const matches=cards.filter(c=>r.ids.includes(c.id));if(matches.length){stopCamera();showResult(matches,false);}else message('Card unavailable','Refresh the catalog and try scanning this card again.');};$('recentList').append(b);}
+  for(const r of recent){const b=document.createElement('button');b.className='recent-item';const im=document.createElement('img');im.alt='';im.src=safeURL(r.image);im.onerror=()=>im.hidden=true;const name=document.createElement('strong');name.textContent=r.name;const p=document.createElement('span');p.textContent=r.display;b.append(im,name,p);b.onclick=()=>{if(busy)return;resultCandidates=[];const matches=cards.filter(c=>r.ids.includes(c.id));if(matches.length){stopCamera();showResult(r.types?matches.map(c=>({...c,prices:c.prices.filter(p=>r.types.includes(p.type))})):matches,false);}else message('Card unavailable','Refresh the catalog and try scanning this card again.');};$('recentList').append(b);}
 }
-$('scanButton').onclick=()=>stream?scanCamera():startCamera();
+$('scanButton').onclick=()=>{resultCandidates=[];$('result').hidden=true;return stream?scanCamera():startCamera();};
 $('stopCamera').onclick=()=>{stopCamera();status('Camera stopped.');};
-$('nextScan').onclick=()=>{window.scrollTo({top:0,behavior:'smooth'});startCamera();};
+$('nextScan').onclick=()=>{if(busy)return;resultCandidates=[];$('result').hidden=true;window.scrollTo({top:0,behavior:'smooth'});if(stream){status('Scanning automatically.');scanCamera();}else startCamera();};
 $('uploadButton').onclick=()=>{if(!busy)$('photoInput').click();};
 $('photoInput').onchange=async e=>{
   const file=e.target.files?.[0];if(!file||busy)return;stopCamera();clearPhoto();

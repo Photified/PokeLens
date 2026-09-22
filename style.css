@@ -2,3 +2,16 @@
 
 /* v1.1: larger capture region, while preserving the full card ratio. */
 .scanner{height:440px}.viewfinder{width:min(84%,260px);height:auto;aspect-ratio:5/7}.idle-art{width:158px;height:221px}@media(min-width:700px){.scanner{height:460px}.viewfinder{width:275px;height:385px}}@media(max-height:780px) and (max-width:600px){.scanner{height:380px}.viewfinder{width:220px;height:308px}}
+
+/* Ranked candidates reuse the existing result panel and price source. */
+.candidate-list{display:grid;gap:12px;margin:16px 0;max-height:65vh;overflow-y:auto;overscroll-behavior:contain}
+.candidate{display:flex;align-items:flex-start;gap:14px;width:100%;text-align:left;padding:14px;border:1px solid #344247;border-radius:16px;background:#142022;color:var(--text,#eef5f4);font:inherit;cursor:pointer;min-width:0}
+.candidate:focus-visible{outline:3px solid var(--mint);outline-offset:-3px}
+.candidate img{width:78px;height:110px;object-fit:contain;flex-shrink:0;border-radius:5px}
+.candidate-info{display:grid;gap:6px;min-width:0;overflow-wrap:anywhere;font-size:14px}
+.candidate-info strong{font-size:17px}.candidate-info small{color:#99aaa8;font-size:12px}
+.candidate-price{color:var(--mint);font-weight:650}
+[hidden]{display:none!important}
+
+.candidate-select{border:0;background:none;color:var(--text);padding:0;text-align:left;font-size:17px;font-weight:700}
+button.candidate-price{border:1px solid #526b5e;border-radius:8px;background:#20362c;text-align:left;padding:9px 10px;font-size:13px;min-height:42px}

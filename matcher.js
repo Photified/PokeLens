@@ -4,7 +4,7 @@ export function cardName(s) { return normalize(String(s).replace(/\s*\([^)]*\)/g
 export function numKey(s) { return normalize(s).replace(/(^|[A-Z])0+(?=\d)/g, '$1'); }
 export function prepare(cards) {
   return cards.map(c => {
-    const [num, total] = c.number.split('/');
+    const [num, total] = (c.number||'').split('/');
     return {...c, _name: cardName(c.name), _num: numKey(num), _total: numKey(total)};
   });
 }
@@ -62,9 +62,41 @@ export function numberCandidates(text,cards) {
 }
 // A title match only proposes reference artwork. It never directly returns a price.
 export function nameCandidates(title,cards){
- const text=normalize(title),words=String(title).toUpperCase().split(/[^A-Z0-9]+/).filter(w=>w.length>=4);
+ const text=normalize(title),words=String(title).toUpperCase().split(/[^A-Z0-9]+/).filter(w=>w.length>=3);
  const names=[...new Set(cards.map(c=>c._name.replace(/(?:VMAX|VSTAR|GX|EX|V|BREAK)$/,'')))];
- const found=names.filter(n=>n.length>=4&&(text.includes(n)||words.some(w=>w.length>=5&&Math.abs(n.length-w.length)<=1&&distance(n,w)<=1)));
+ const found=names.filter(n=>n.length>=3&&((n.length===3?(words.includes(n)||new RegExp('\\b'+n.split('').join('\\s*')+'\\b').test(String(title).toUpperCase())):text.includes(n))||words.some(w=>w.length>=4&&Math.abs(n.length-w.length)<=1&&distance(n,w)<=1)));
  const longest=found.filter(n=>!found.some(other=>other!==n&&other.includes(n)));
  return cards.filter(c=>longest.includes(c._name.replace(/(?:VMAX|VSTAR|GX|EX|V|BREAK)$/,'')));
+}
+
+// Candidate evidence is additive. Missing or misread details never hard-exclude a printing.
+export function rankCandidates(text,cards,title=text){
+ const compact=normalize(text), raw=String(text).toUpperCase();
+ const named=new Set(nameCandidates(title,cards).map(c=>c.id));
+ const numbered=new Set(numberCandidates(text,cards).map(c=>c.id));
+ const hp=[...raw.matchAll(/(?:HP\s*(\d{2,3})|(\d{2,3})\s*HP)/g)].map(m=>Number(m[1]||m[2]));
+ const tokens=new Set(raw.split(/[^A-Z0-9]+/).filter(Boolean));
+ const ranked=[];
+ for(const card of cards){
+  let score=0;const evidence=[];
+  if(named.has(card.id)){score+=32;evidence.push('Name');}
+  if(numbered.has(card.id)){score+=42;evidence.push('Number');}
+  if(card.hp&&hp.includes(Number(card.hp))){score+=9;evidence.push('HP');}
+  const attacks=(card.attacks||[]).map(a=>normalize(a.replace(/^\[[^\]]*\]\s*/, '').replace(/\([^)]*\)/g,''))).filter(a=>a.length>=6);
+  const seen=attacks.filter(a=>compact.includes(a));
+  if(seen.length){score+=Math.min(48,seen.length*24);evidence.push('Attack text');}
+  if(card.setCode&&normalize(card.setCode).length>=3&&tokens.has(normalize(card.setCode))&&!named.has(card.id)){score+=10;evidence.push('Set code');}
+  // HP / a common set code alone is not enough to show a priced suggestion.
+  if(!named.has(card.id)&&!numbered.has(card.id)&&!seen.length)continue;
+  ranked.push({card,score,evidence});
+ }
+ return ranked.sort((a,b)=>b.score-a.score||a.card.id-b.card.id);
+}
+export function mergeEvidence(textRank,visualRank=[]){
+ const map=new Map(textRank.map(r=>[r.card.id,{...r,evidence:[...r.evidence]}]));
+ for(const r of visualRank){const item=map.get(r.card.id)||{card:r.card,score:0,evidence:[]};
+  item.score+=Math.max(0,(.42-r.score)*180);item.visual=r.score;
+  if(r.score<.32)item.evidence.push('Artwork');map.set(r.card.id,item);
+ }
+ return [...map.values()].sort((a,b)=>b.score-a.score||a.card.id-b.card.id);
 }
