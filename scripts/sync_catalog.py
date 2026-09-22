@@ -2,7 +2,7 @@
 """Build a same-origin Pokémon card + price snapshot; no keys or browser proxy.
 TCGCSV refreshes daily. Respect its user agent, pacing and timestamp policy.
 """
-import concurrent.futures, datetime, json, pathlib, threading, time, urllib.request, urllib.error, re
+import html, concurrent.futures, datetime, json, pathlib, threading, time, urllib.request, urllib.error, re
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 BASE = 'https://tcgcsv.com/'
 lock = threading.Lock()
@@ -32,7 +32,7 @@ def sync():
     dest = ROOT / 'data/catalog.json'
     previous = json.loads(dest.read_text()) if dest.exists() else {}
     stamp = get('last-updated.txt', raw=True)
-    if previous.get('sourceUpdated') == stamp and previous.get('cards'):
+    if previous.get('sourceUpdated') == stamp and previous.get('cards') and previous.get('version') == 2:
         print('Catalog already current', flush=True)
         return
     groups = get('tcgplayer/3/groups')
@@ -56,6 +56,8 @@ def sync():
             out.append({'id': p['productId'], 'name': p['name'], 'number': number,
                         'set': group['name'], 'setCode': group.get('abbreviation', ''), 'group': gid,
                         'image': p.get('imageUrl', ''), 'url': p.get('url', ''),
+                        'hp': ext.get('hp', ''),
+                        'attacks': [html.unescape(re.sub(r'<[^>]+>', ' ', re.split(r'[\r\n]|<br', v, flags=re.I)[0])).strip() for k,v in ext.items() if k.startswith('attack')],
                         'prices': byid.get(p['productId'], [])})
         print(f"{group['name']}: {len(out)} cards", flush=True)
         return out
@@ -66,7 +68,7 @@ def sync():
         raise RuntimeError('Incomplete catalog: refusing to replace the previous snapshot')
     if previous.get('cards') and len(cards) < len(previous['cards']) * .9:
         raise RuntimeError('Unexpected catalog shrink: preserving previous snapshot')
-    snapshot = {'version': 1, 'source': 'TCGplayer via TCGCSV', 'currency': 'USD',
+    snapshot = {'version': 2, 'source': 'TCGplayer via TCGCSV', 'currency': 'USD',
                 'sourceUpdated': stamp, 'generatedAt': datetime.datetime.now(datetime.timezone.utc).isoformat(),
                 'setCount': len(groups), 'cardCount': len(cards), 'cards': sorted(cards, key=lambda c: c['id'])}
     dest.parent.mkdir(exist_ok=True)
