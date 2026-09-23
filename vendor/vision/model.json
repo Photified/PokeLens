@@ -1,0 +1,20 @@
+{
+  "name": "DINOv2-small",
+  "sha256": "3afdc8bc63b50558d6e5770f5b799bb82455c2311183a2de43803f343a29d917",
+  "size": 224,
+  "dimensions": 384,
+  "output": "last_hidden_state",
+  "preprocessing": "RGB full-card resize 224 square; /255; mean .485,.456,.406; std .229,.224,.225; CLS token L2 normalized",
+  "parts": [
+    {
+      "file": "model-0.bin",
+      "bytes": 16777216,
+      "sha256": "ce2f6cb707b103c0177c3410d45671184551a1292c6c151c08678fb97c57e651"
+    },
+    {
+      "file": "model-1.bin",
+      "bytes": 7674727,
+      "sha256": "8da466fbbe4ff9a0d9e161f877f734282ad38875e8424e340391193b5d73d83e"
+    }
+  ]
+}
