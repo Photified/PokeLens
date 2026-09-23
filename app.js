@@ -1,9 +1,11 @@
-import {prepare,identify,summarizePrices,nameCandidates,rankCandidates,mergeEvidence} from './matcher.js';
-import {visualRank,sameFrame} from './visual.js';
-import {cardViews,textRegion} from './imaging.js';
+import {prepare,summarizePrices} from './matcher.js';
+import {prepareVision,sameCardFeatures,resetVision} from './visual.js';
+import {getCV} from './imaging.js';
+import {makeRecognizer} from './recognition.js';
+import {prepareOCR,scanFrame} from './scanner.js';
 const $=id=>document.getElementById(id);
-let catalog, cards=[], workerPromise, stream, timer, busy=false, deferredInstall=null, photoURL=null;
-let selectedDuringScan=false;
+let catalog, cards=[], stream, timer, busy=false, deferredInstall=null, photoURL=null;
+let selectedDuringScan=false,recognize;
 let resultCandidates=[], candidateCount=0, scanGeneration=0;
 let pref={auto:true,speak:false}, recent=[];
 try { pref={...pref,...JSON.parse(localStorage.getItem('pokelens-prefs')||'{}')}; recent=JSON.parse(localStorage.getItem('pokelens-recent')||'[]'); if(!Array.isArray(recent))recent=[]; } catch {}
@@ -19,30 +21,13 @@ async function loadCatalog(){
     if(!response.ok)throw new Error('catalog');
     const data=await response.json();
     if(!Array.isArray(data.cards)||!data.cards.length)throw new Error('empty');
-    catalog=data;cards=prepare(data.cards);
+    catalog=data;cards=prepare(data.cards);recognize=makeRecognizer(cards);
     $('catalogInfo').textContent=`${data.cardCount.toLocaleString()} listings · ${data.setCount} sets · TCGplayer via TCGCSV`;
     $('scanButton').disabled=false;$('uploadButton').disabled=false;$('scanLabel').textContent='Scan a card';
     status('Ready to scan. No typing needed.');
   } catch {status('Catalog unavailable. Reconnect and tap to retry.',true);$('scanButton').disabled=false;$('scanLabel').textContent='Retry loading catalog';}
 }
-function getWorker(){
-  if(!workerPromise){
-    workerPromise=(async()=>{
-      if(!window.Tesseract)throw new Error('Scanner files did not load. Reload the app.');
-      status('Preparing scanner on this device…');
-      const w=await Tesseract.createWorker('eng',1,{
-        workerPath:new URL('./vendor/worker.min.js',location.href).href,
-        corePath:new URL('./vendor/',location.href).href,
-        langPath:new URL('./vendor/best/',location.href).href,
-        cachePath:'pokelens-ocr-v11',
-        logger:m=>{if(busy&&m.status==='recognizing text')status('Reading card… '+Math.round(m.progress*100)+'%');}
-      });
-      await w.setParameters({tessedit_pageseg_mode:'11',preserve_interword_spaces:'1'});
-      return w;
-    })().catch(e=>{workerPromise=null;throw e;});
-  }
-  return workerPromise;
-}
+const getWorker=()=>prepareOCR(status);
 function stopCamera(){scanGeneration++;clearTimeout(timer);if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;}$('camera').srcObject=null;$('camera').hidden=true;$('stopCamera').hidden=true;$('cameraLabel').textContent='READY WHEN YOU ARE';if(!$('captured').src)$('idleArt').hidden=false;$('scanLabel').textContent='Scan a card';}
 function schedule(){clearTimeout(timer);if(stream&&pref.auto&&!busy&&!$('settings').open&&!$('message').open&&$('result').hidden)timer=setTimeout(()=>scanCamera(),1800);}
 async function startCamera(){
@@ -58,7 +43,7 @@ async function startCamera(){
     $('idleArt').hidden=true;$('stopCamera').hidden=false;$('viewfinder').hidden=false;
     $('cameraLabel').textContent='CAMERA ON';$('scanLabel').textContent='Scan now';$('frameHint').textContent='Fill the frame. Hold steady.';
     status(pref.auto?'Hold your card in the frame. Scanning automatically.':'Line up your card and tap Scan now.');
-    getWorker().catch(()=>{});schedule();
+    Promise.all([getWorker(),prepareVision(status),getCV()]).catch(()=>{});schedule();
   } catch(e){stopCamera();status('Camera unavailable. You can scan a photo instead.',true);message('Camera access',e.name==='NotAllowedError'?'Allow camera access in your browser settings, then try again. You can also use Scan a photo.':e.message||'Could not open the camera. Try Scan a photo.');}
 }
 function clearPhoto(){if(photoURL){URL.revokeObjectURL(photoURL);photoURL=null;}$('captured').removeAttribute('src');$('captured').hidden=true;}
@@ -79,44 +64,23 @@ async function runScan(canvas,fromCamera=false){
   busy=true;selectedDuringScan=false;resultCandidates=[];$('result').hidden=true;$('nextScan').disabled=true;$('scanButton').disabled=true;$('uploadButton').disabled=true;
   document.querySelector('.scanner').classList.add('busy');$('scanLabel').textContent='Scanning…';
   try {
-    const w=await getWorker(),views=cardViews(canvas),aligned=views[0];
-    await w.setParameters({tessedit_pageseg_mode:'7'});
-    status('Reading card details…');
-    let title=(await w.recognize(textRegion(aligned,'title','color'))).data.text;
-    if(!nameCandidates(title,cards).length){for(const view of views.slice(1,3)){title+='\n'+(await w.recognize(textRegion(view,'title','color'))).data.text;if(nameCandidates(title,cards).length)break;}}
-    await w.setParameters({tessedit_pageseg_mode:'11'});
-    let combinedText=title+'\n'+(await w.recognize(textRegion(canvas,'full','legacy'))).data.text;
-    // The original image is read too: holders can confuse the edge-based crop.
-    combinedText+='\n'+(await w.recognize(textRegion(aligned,'bottom','gray'))).data.text;
-    let ranked=rankCandidates(combinedText,cards,combinedText);
-    if(!ranked.length){
-      combinedText+='\n'+(await w.recognize(textRegion(aligned,'full','gray'))).data.text;
-      ranked=rankCandidates(combinedText,cards,combinedText);
-    }
+    const readFrame=source=>scanFrame(source,status);
+    let frames=[await readFrame(canvas)];
     if(fromCamera&&stream&&generation===scanGeneration){
-      const next=cameraFrame();
-      // Fuse text only while the same card is still present, never across unrelated pulls.
-      if(sameFrame(canvas,next)){
-        combinedText+='\n'+(await w.recognize(textRegion(next,'full','gray'))).data.text;
-        views.push(...cardViews(next).slice(0,3));
-        ranked=rankCandidates(combinedText,cards,combinedText);
-      }
+      const next=await readFrame(cameraFrame());
+      if(sameCardFeatures(frames[0].features,next.features))frames.push(next);
+      else frames=[next]; // A new physical card must not inherit the previous card's words.
     }
     if(fromCamera&&(!stream||generation!==scanGeneration))return;
+    const ranked=recognize(frames);
     if(ranked.length){
-      // Render useful suggestions before downloading any reference images.
-      showCandidates(ranked,fromCamera,false);
-      status('Possible matches found. Comparing artwork…');
-      const visual=await visualRank(views,ranked.slice(0,120).map(r=>r.card));
-      if(fromCamera&&(!stream||generation!==scanGeneration))return;
-      ranked=mergeEvidence(ranked,visual);
-      if(!selectedDuringScan)showCandidates(ranked,fromCamera,true);else resultCandidates=ranked;
+      showCandidates(ranked,fromCamera,true);
       if(!fromCamera){clearPhoto();$('captured').src=canvas.toDataURL('image/jpeg',.8);$('captured').hidden=false;$('idleArt').hidden=true;$('viewfinder').hidden=true;}
-      status(selectedDuringScan?'Selected card. Tap Scan next card to continue.':'Possible matches ready. Scroll to compare printings.');
+      status('Possible matches ready. Tap your printing.');
       $('frameHint').textContent='Matches below. Tap Scan next card to continue.';
     }else{
-      status('No useful match yet. '+(fromCamera?'Checking again automatically.':'Try a closer photo.'),true);
-      $('frameHint').textContent='Keep the card in view.';
+      status(fromCamera?'Checking another frame…':'No reliable match in this photo.',true);
+      $('frameHint').textContent='Keep one card in view.';
     }
   }catch(e){status('Scan interrupted. Tap Scan now to retry.',true);message('Scanner unavailable',e.message||'Reload the app and try again.');}
   finally{busy=false;$('nextScan').disabled=false;document.querySelector('.scanner').classList.remove('busy');$('scanButton').disabled=false;$('uploadButton').disabled=false;$('scanLabel').textContent=stream?'Scan now':'Scan a card';schedule();}
@@ -208,7 +172,7 @@ $('messageClose').onclick=$('messageOkay').onclick=()=>$('message').close();$('m
 $('autoScan').checked=pref.auto;$('speak').checked=pref.speak;
 $('autoScan').onchange=e=>{pref.auto=e.target.checked;savePrefs();schedule();};$('speak').onchange=e=>{pref.speak=e.target.checked;savePrefs();};
 $('clearRecent').onclick=()=>{recent=[];try{localStorage.removeItem('pokelens-recent');}catch{}renderRecent();};
-$('refreshData').onclick=async()=>{if(busy){message('Scan in progress','Let this scan finish, then refresh the catalog.');return;}$('refreshData').disabled=true;await loadCatalog();$('refreshData').disabled=false;message('Catalog checked',catalog?`${catalog.cardCount.toLocaleString()} listings loaded. Prices update after your daily GitHub workflow finishes.`:'Could not load the catalog. Check your connection.');};
+$('refreshData').onclick=async()=>{if(busy){message('Scan in progress','Let this scan finish, then refresh the catalog.');return;}$('refreshData').disabled=true;resetVision();await loadCatalog();$('refreshData').disabled=false;message('Catalog checked',catalog?`${catalog.cardCount.toLocaleString()} listings loaded. Prices update after your daily GitHub workflow finishes.`:'Could not load the catalog. Check your connection.');};
 function installed(){return matchMedia('(display-mode: standalone)').matches||navigator.standalone;}
 function updateInstallHelp(){
   $('install').textContent=installed()?'App installed':'Install App';$('install').disabled=!!installed();

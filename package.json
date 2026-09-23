@@ -1,1 +1,1 @@
-{"name": "pokelens", "version": "1.2.0", "private": true, "type": "module", "scripts": {"test": "node tests/matcher.test.js && node tests/candidates.test.js"}}
+{"name":"pokelens","version":"2.0.0","private":true,"type":"module","scripts":{"test":"node --test tests/recognition.test.js"}}

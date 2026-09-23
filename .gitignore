@@ -1,2 +1,5 @@
 site-dist/
+.cache/
 __pycache__/
+node_modules/
+PokeLens-source.zip
